@@ -1,0 +1,233 @@
+package org.example.save.dell.eee;
+
+import java.util.*;
+import java.util.logging.*;
+
+/**
+ *  Алгоритм угадывания комбинации чисел
+ *  Автор: Соловьёв Владимир Николаевич 01.03.1989
+ *  Назначение: обучение, демонстрация логики, архитектура
+ */
+public class Main {
+
+    private static final Logger LOGGER = Logger.getLogger(Main.class.getName());
+
+    static {
+        ConsoleHandler handler = new ConsoleHandler() {
+            @Override
+            public void publish(LogRecord record) {
+                String greenMessage = "\u001B[32m" + getFormatter().format(record) + "\u001B[0m";
+                System.out.print(greenMessage);
+            }
+        };
+        handler.setLevel(Level.ALL);
+        handler.setFormatter(new SimpleFormatter());
+
+        LOGGER.setUseParentHandlers(false);
+        LOGGER.addHandler(handler);
+        LOGGER.setLevel(Level.INFO);
+    }
+
+    public static void main(String[] args) {
+        int totalGames = 10000;          // количество игр
+        int successfulGames = 0;        // количество удачных (<=10 попыток)
+        int sumAttemptsAllGames = 0;    // сумма всех попыток
+
+        for (int game = 1; game <= totalGames; game++) {
+            LOGGER.info("=== Игра № " + game + " ===");
+            int attempts = playSingleGame(); // число попыток в этой игре
+            boolean guessed = (attempts > 0 && attempts <= 10);
+            if (guessed) {
+                successfulGames++;
+                sumAttemptsAllGames += attempts;
+            }
+            LOGGER.info("Конец игры №" + game + ". Угадано: " + (guessed ? "ДА" : "НЕТ")
+                    + " --------------------------------------------");
+        }
+
+        LOGGER.info("Количество удачных игр из " + totalGames + ": " + successfulGames);
+        if (successfulGames > 0) {
+            double averageAttempts = (double) sumAttemptsAllGames / successfulGames;
+            LOGGER.info("Среднее число попыток (на выигрышную игру): " + String.format("%.3f", averageAttempts));
+        }
+    }
+
+    /**
+     * Одна игра: генерирует комбинации, загадывает секрет, ищет его.
+     * Возвращает число попыток, если угадано, иначе -1.
+     */
+    private static int playSingleGame() {
+        List<int[]> combinations = generateUniqueCombinations(100);
+        int[] frequency = countNumberFrequencies(combinations);
+        sortCombinationsByFrequency(combinations, frequency);
+
+        int[] secretCombo = combinations.get(new Random().nextInt(combinations.size()));
+        LOGGER.info("Загадана комбинация программой: " + Arrays.toString(secretCombo));
+
+        List<int[]> pastGuessesInfo = new ArrayList<>();
+        int attempt = 0;
+        int[] currentGuess = combinations.get(0);
+        LOGGER.info("Первая попытка (самый частотный кандидат): " + Arrays.toString(currentGuess));
+
+        while (attempt < 9) {
+            attempt++;
+            int matches = countMatches(currentGuess, secretCombo);
+            LOGGER.info("Попытка " + attempt + ": " + Arrays.toString(currentGuess) +
+                    " — совпадений с секретом: " + matches);
+
+            if (matches == 5) {
+                LOGGER.info("Выигрыш! Комбинация угадана за " + attempt + " попыток.");
+                return attempt;
+            }
+
+            if (matches > 0) {
+                saveGuessInfo(pastGuessesInfo, currentGuess, matches);
+            }
+
+            if (matches == 0) {
+                for (int num : currentGuess) {
+                    removeCombinationsContaining(combinations, num, currentGuess);
+                }
+                combinations.remove(currentGuess);
+                sortCombinationsByFrequency(combinations, frequency);
+                if (!pastGuessesInfo.isEmpty()) {
+                    int[] next = findConsistentCombination(combinations, pastGuessesInfo);
+                    currentGuess = (next != null) ? next : combinations.get(0);
+                } else {
+                    currentGuess = combinations.get(0);
+                }
+            } else {
+                if (matches < 4) {
+                    removeCombinationsWithTooManyMatches(combinations, currentGuess, matches + 1);
+                }
+                combinations.remove(currentGuess);
+                if (!combinations.isEmpty()) {
+                    currentGuess = combinations.get(0);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // 10-я попытка
+        LOGGER.info("Подготовка к 10-й попытке: анализ оставшихся комбинаций...");
+        int[] finalCandidate = findConsistentCombination(combinations, pastGuessesInfo);
+        if (finalCandidate == null && !combinations.isEmpty()) {
+            finalCandidate = combinations.get(0);
+            LOGGER.warning("Финальный кандидат не определён точно. Берём первый: " + Arrays.toString(finalCandidate));
+        }
+        if (finalCandidate != null) {
+            int matches = countMatches(finalCandidate, secretCombo);
+            LOGGER.info("Попытка 10: " + Arrays.toString(finalCandidate) + " — совпадений: " + matches);
+            if (matches == 5) {
+                LOGGER.info("Выигрыш на 10-й попытке!");
+                return 10;
+            }
+        }
+
+        return -1;
+    }
+
+    private static List<int[]> generateUniqueCombinations(int count) {
+        List<int[]> combinations = new ArrayList<>();
+        Random rand = new Random();
+        while (combinations.size() < count) {
+            int[] combo = new int[]{
+                    rand.nextInt(10),
+                    rand.nextInt(10) + 10,
+                    rand.nextInt(10) + 20,
+                    rand.nextInt(10) + 30,
+                    rand.nextInt(10) + 40
+            };
+            if (!containsCombination(combinations, combo)) {
+                combinations.add(combo);
+            }
+        }
+        return combinations;
+    }
+
+    private static boolean containsCombination(List<int[]> combinations, int[] combo) {
+        for (int[] existing : combinations) {
+            if (Arrays.equals(existing, combo)) return true;
+        }
+        return false;
+    }
+
+    private static int[] countNumberFrequencies(List<int[]> combinations) {
+        int[] frequency = new int[50];
+        for (int[] combo : combinations) {
+            for (int num : combo) frequency[num]++;
+        }
+        return frequency;
+    }
+
+    private static void sortCombinationsByFrequency(List<int[]> combinations, int[] frequency) {
+        combinations.sort((a, b) -> {
+            int sumA = Arrays.stream(a).map(i -> frequency[i]).sum();
+            int sumB = Arrays.stream(b).map(i -> frequency[i]).sum();
+            return Integer.compare(sumB, sumA);
+        });
+    }
+
+    private static int countMatches(int[] combo1, int[] combo2) {
+        int count = 0;
+        for (int num1 : combo1) {
+            for (int num2 : combo2) {
+                if (num1 == num2) {
+                    count++;
+                    break;
+                }
+            }
+        }
+        return count;
+    }
+
+    private static void saveGuessInfo(List<int[]> infoList, int[] guess, int matches) {
+        int[] record = Arrays.copyOf(guess, 6);
+        record[5] = matches;
+        infoList.add(record);
+    }
+
+    private static void removeCombinationsWithTooManyMatches(List<int[]> combinations, int[] guess, int minMatches) {
+        combinations.removeIf(combo -> {
+            if (combo == guess) return false;
+            int common = 0;
+            for (int n : guess) {
+                for (int m : combo) {
+                    if (n == m) {
+                        common++;
+                        if (common >= minMatches) return true;
+                    }
+                }
+            }
+            return false;
+        });
+    }
+
+    private static void removeCombinationsContaining(List<int[]> combinations, int num, int[] exclude) {
+        combinations.removeIf(combo -> combo != exclude && Arrays.stream(combo).anyMatch(n -> n == num));
+    }
+
+    private static int[] findConsistentCombination(List<int[]> candidates, List<int[]> clues) {
+        for (int[] cand : candidates) {
+            boolean valid = true;
+            for (int[] clue : clues) {
+                int expected = clue[5], actual = 0;
+                for (int i = 0; i < 5; i++) {
+                    for (int j = 0; j < 5; j++) {
+                        if (cand[j] == clue[i]) {
+                            actual++;
+                            break;
+                        }
+                    }
+                }
+                if (actual < expected) {
+                    valid = false;
+                    break;
+                }
+            }
+            if (valid) return cand;
+        }
+        return null;
+    }
+}
